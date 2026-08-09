@@ -5,7 +5,9 @@ import shutil
 from modules.brain import ContentBrain
 from modules.asset_manager import AssetManager
 from modules.audio import AudioEngine
+from modules.rvc_converter import RVCConverter
 from modules.composer import Composer
+
 
 def clean_cache():
     print("🧹 Cleaning up temporary files...")
@@ -28,6 +30,7 @@ def clean_cache():
             except Exception as e:
                 print(f"❌ Failed to delete {file_path}. Reason: {e}")
     print("✨ Workspace clean!")
+
 
 async def main():
     print("🚀 STARTING AUTOMATION...")
@@ -56,7 +59,7 @@ async def main():
         json.dump(metadata, f, ensure_ascii=False, indent=4)
     print(f"📝 Metadata saved to {metadata_path}")
 
-    # 2. AUDIO: Generate Voice + Hook SFX
+    # 2. AUDIO: Generate Original TTS Voice + Word Timestamps (subtitle kaynağı)
     audio_engine = AudioEngine()
     try:
         scenes = await audio_engine.process_script(scenes)
@@ -64,11 +67,37 @@ async def main():
         print(f"❌ Audio Error: {e}")
         return
 
+    # 2.5 RVC: Orijinal TTS sesini hedef sese dönüştür.
+    # ÖNEMLİ: word_timestamps (altyazı verisi) zaten yukarıda, orijinal TTS'ten
+    # çıkarıldı ve scene dict'inde saklı. RVC sadece ses dosyasını değiştirir,
+    # altyazı verisine hiç dokunmaz - RVC sonrası tekrar transcription YAPILMAZ.
+    print("🎭 Starting RVC Voice Conversion...")
+    try:
+        rvc = RVCConverter()
+        for scene in scenes:
+            original_path = scene.get('audio_path')
+            if not original_path or not os.path.exists(original_path):
+                print(f"   ⚠️ Scene {scene['id']}: audio_path yok, RVC atlanıyor.")
+                continue
+
+            converted_path = os.path.splitext(original_path)[0] + "_rvc.wav"
+            try:
+                rvc.convert(original_path, converted_path)
+                scene['audio_path'] = converted_path
+                print(f"   ✅ Scene {scene['id']}: RVC dönüşümü tamamlandı.")
+            except Exception as scene_err:
+                print(f"   ⚠️ Scene {scene['id']}: RVC dönüşümü başarısız, orijinal TTS sesi kullanılacak. Hata: {scene_err}")
+                # scene['audio_path'] orijinal kalır, pipeline durmaz
+    except Exception as e:
+        print(f"⚠️ RVC Converter başlatılamadı, tüm sahneler orijinal TTS sesiyle devam edecek: {e}")
+
     # 3. ASSETS: Get Stock Video
     asset_manager = AssetManager()
     assets_map = asset_manager.get_videos(scenes)
 
-    # 4. COMPOSER: Merge Video + Audio + High-Quality Captions
+    # 4. COMPOSER: Merge Video + (RVC) Audio + High-Quality Captions
+    # composer.py hiç değişmedi - scene['audio_path'] ve scene['word_timestamps']
+    # okuyor, hangisinin RVC'den geldiği onun için önemli değil.
     composer = Composer()
     final_scene_paths = composer.render_all_scenes(scenes, assets_map)
 
@@ -79,5 +108,7 @@ async def main():
     else:
         print("❌ Failed to generate any scenes.")
 
+
 if __name__ == "__main__":
     asyncio.run(main())
+    
