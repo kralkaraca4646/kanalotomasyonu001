@@ -6,3 +6,6 @@ requests
 mutagen
 python-dotenv
 groq
+rvc-python
+torch==2.1.1
+torchaudio==2.1.1
